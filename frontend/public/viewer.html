@@ -1,0 +1,103 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>AlphaBetter 3D Viewer</title>
+  <style>
+    html, body { margin: 0; width: 100%; height: 100%; overflow: hidden; background: #ffffff; }
+    #viewer { width: 100%; height: 100%; }
+    #loading {
+      position: fixed; inset: 0; display: grid; place-items: center;
+      font: 14px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      color: #667085; background: #fff;
+    }
+  </style>
+  <script src="https://unpkg.com/ngl@2.0.0-dev.37/dist/ngl.js"></script>
+</head>
+<body>
+  <div id="viewer"></div>
+  <div id="loading">正在加载 3D 查看器…</div>
+
+  <script>
+    const stage = new NGL.Stage('viewer', { backgroundColor: 'white' });
+    const loading = document.getElementById('loading');
+    let currentComponent = null;
+
+    function hex(r, g, b) {
+      return (r << 16) | (g << 8) | b;
+    }
+
+    function mix(a, b, t) {
+      return Math.round(a + (b - a) * t);
+    }
+
+    function createScoreScheme(maxAbs) {
+      const scale = Math.max(Number(maxAbs) || 1, 0.0001);
+      return NGL.ColormakerRegistry.addScheme(function () {
+        this.atomColor = function (atom) {
+          const value = Number(atom.bfactor) || 0;
+          const eps = 0.03;
+
+          // 0 永远位于黄色中心；负值向红色过渡；正值向绿色过渡。
+          if (value < -eps) {
+            const t = Math.min(1, Math.abs(value) / scale);
+            return hex(
+              mix(255, 215, t),
+              mix(255, 25, t),
+              mix(191, 28, t),
+            );
+          }
+
+          if (value > eps) {
+            const t = Math.min(1, value / scale);
+            return hex(
+              mix(255, 26, t),
+              mix(255, 150, t),
+              mix(191, 65, t),
+            );
+          }
+
+          return 0xffffbf;
+        };
+      });
+    }
+
+    async function loadPDB(pdbText, maxAbs) {
+      loading.style.display = 'grid';
+      try {
+        if (currentComponent) {
+          currentComponent.dispose();
+          currentComponent = null;
+        }
+
+        const blob = new Blob([pdbText], { type: 'text/plain' });
+        const file = new File([blob], 'structure.pdb', { type: 'text/plain' });
+        currentComponent = await stage.loadFile(file, { ext: 'pdb' });
+
+        const schemeId = createScoreScheme(maxAbs);
+        currentComponent.addRepresentation('cartoon', {
+          color: schemeId,
+          quality: 'medium',
+        });
+        currentComponent.autoView();
+        stage.handleResize();
+      } catch (error) {
+        console.error('NGL 加载 PDB 失败:', error);
+      } finally {
+        loading.style.display = 'none';
+      }
+    }
+
+    window.addEventListener('message', (event) => {
+      if (event.origin !== window.location.origin) return;
+      if (!event.data || event.data.type !== 'loadPDB') return;
+      loadPDB(event.data.pdbText, event.data.maxAbs);
+    });
+
+    window.addEventListener('resize', () => stage.handleResize());
+    loading.style.display = 'none';
+    window.parent.postMessage({ type: 'viewerReady' }, window.location.origin);
+  </script>
+</body>
+</html>
